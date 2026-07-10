@@ -1,7 +1,8 @@
 """ComfyUI video generation via a local or remote ComfyUI server.
 
-Supports text-to-video and image-to-video using WAN 2.2 14B with
-4-step LightX2V LoRA acceleration.  Custom workflows are accepted
+Supports text-to-video and image-to-video using bundled WAN 2.2 14B
+with 4-step LightX2V LoRA acceleration (high VRAM), or LTX-Video
+2B 0.9.5 for GPUs with 8-12 GB VRAM.  Custom workflows are accepted
 via the ``workflow_json`` input.
 """
 
@@ -41,6 +42,10 @@ _WORKFLOWS = Path(__file__).resolve().parent.parent / "_comfyui" / "workflows"
 _T2V_OUTPUT_NODE = "16"
 _I2V_OUTPUT_NODE = "108"
 
+# Output node IDs in the low-VRAM (LTX-Video 2B) workflows
+_LOWVRAM_T2V_OUTPUT_NODE = "11"
+_LOWVRAM_I2V_OUTPUT_NODE = "12"
+
 # Models required by the bundled WAN 2.2 workflows
 _REQUIRED_MODELS_COMMON = [
     "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
@@ -60,6 +65,20 @@ _REQUIRED_MODELS_T2V = [
     "wan_2.1_vae.safetensors",
     "wan2.2_t2v_lightx2v_4steps_lora_v1.1_high_noise.safetensors",
     "wan2.2_t2v_lightx2v_4steps_lora_v1.1_low_noise.safetensors",
+]
+
+# Models required by the low-VRAM LTX-Video 2B workflows.
+# These go in ComfyUI/models/checkpoints/ and text_encoders/ respectively.
+_LOWVRAM_MODELS_COMMON = [
+    "t5xxl_fp8_e4m3fn_scaled.safetensors",
+]
+_LOWVRAM_MODELS_T2V = [
+    *_LOWVRAM_MODELS_COMMON,
+    "ltx-video-2b-v0.9.5.safetensors",
+]
+_LOWVRAM_MODELS_I2V = [
+    *_LOWVRAM_MODELS_COMMON,
+    "ltx-video-2b-v0.9.5.safetensors",
 ]
 
 _RESOURCE_PROFILES = {
@@ -204,7 +223,7 @@ class ComfyUIVideo(BaseTool):
         if not self._client.is_available():
             return ToolStatus.UNAVAILABLE
         statuses = self.operation_statuses()
-        if any(status == "available" for status in statuses.values()):
+        if any(status in ("available", "available_low_vram") for status in statuses.values()):
             return ToolStatus.AVAILABLE
         if statuses:
             return ToolStatus.DEGRADED
@@ -220,9 +239,19 @@ class ComfyUIVideo(BaseTool):
 
         _, missing_t2v = self._client.check_models(_REQUIRED_MODELS_T2V)
         _, missing_i2v = self._client.check_models(_REQUIRED_MODELS_I2V)
+        _, missing_t2v_low = self._client.check_models(_LOWVRAM_MODELS_T2V)
+        _, missing_i2v_low = self._client.check_models(_LOWVRAM_MODELS_I2V)
+
+        def status(missing_bundled, missing_low) -> str:
+            if not missing_bundled:
+                return "available"
+            if not missing_low:
+                return "available_low_vram"
+            return "degraded"
+
         return {
-            "text_to_video": "available" if not missing_t2v else "degraded",
-            "image_to_video": "available" if not missing_i2v else "degraded",
+            "text_to_video": status(missing_t2v, missing_t2v_low),
+            "image_to_video": status(missing_i2v, missing_i2v_low),
         }
 
     def is_operation_available(self, operation: str) -> bool:
@@ -251,10 +280,12 @@ class ComfyUIVideo(BaseTool):
         return 0.0
 
     def estimate_runtime(self, inputs: dict[str, Any]) -> float:
+        # LTX-Video is faster than WAN 2.2 14B
+        lv = inputs.get("use_low_vram", False)
         operation = inputs.get("operation", "text_to_video")
         if operation == "image_to_video":
-            return 210.0  # ~3.5 min
-        return 240.0  # ~4 min
+            return 120.0 if lv else 210.0
+        return 150.0 if lv else 240.0
 
     def execute(self, inputs: dict[str, Any]) -> ToolResult:
         custom_workflow = bool(inputs.get("workflow_json") or inputs.get("workflow_path"))
@@ -275,29 +306,36 @@ class ComfyUIVideo(BaseTool):
 
         operation = inputs.get("operation", "text_to_video")
 
+        use_low_vram = False
         if not custom_workflow:
             required = _REQUIRED_MODELS_I2V if operation == "image_to_video" else _REQUIRED_MODELS_T2V
             _, missing = self._client.check_models(required)
             if missing:
-                workflow_key = (
-                    "wan22-i2v-4step"
-                    if operation == "image_to_video"
-                    else "wan22-t2v-4step"
-                )
-                return ToolResult(
-                    success=False,
-                    data=missing_models_payload(
-                        missing,
-                        workflow_key=workflow_key,
-                        workflow_name=f"{workflow_key}.json",
-                        operation=operation,
-                    ),
-                    error=(
-                        f"ComfyUI server is running but missing models for {operation}: "
-                        f"{', '.join(missing)}.\n"
-                        f"See data.missing_models for destination hints and download URLs."
-                    ),
-                )
+                # Try low-VRAM (LTX-Video 2B) models as fallback
+                lv_required = _LOWVRAM_MODELS_I2V if operation == "image_to_video" else _LOWVRAM_MODELS_T2V
+                _, lv_missing = self._client.check_models(lv_required)
+                if lv_missing:
+                    # Both model sets are missing; report the bundled set
+                    workflow_key = (
+                        "wan22-i2v-4step"
+                        if operation == "image_to_video"
+                        else "wan22-t2v-4step"
+                    )
+                    return ToolResult(
+                        success=False,
+                        data=missing_models_payload(
+                            missing,
+                            workflow_key=workflow_key,
+                            workflow_name=f"{workflow_key}.json",
+                            operation=operation,
+                        ),
+                        error=(
+                            f"ComfyUI server is running but missing models for {operation}: "
+                            f"{', '.join(missing)}.\n"
+                            f"See data.missing_models for destination hints and download URLs."
+                        ),
+                    )
+                use_low_vram = True
         start = time.time()
         seed = inputs.get("seed") or ComfyUIClient.random_seed()
         output_path = Path(
@@ -308,13 +346,19 @@ class ComfyUIVideo(BaseTool):
             if custom_workflow:
                 workflow = self._load_custom_workflow(inputs)
                 output_node = str(inputs["output_node"])
+            elif use_low_vram:
+                if operation == "image_to_video":
+                    workflow, output_node = self._build_i2v_lowvram(inputs, seed, output_path)
+                else:
+                    workflow, output_node = self._build_t2v_lowvram(inputs, seed, output_path)
             elif operation == "image_to_video":
                 workflow, output_node = self._build_i2v(inputs, seed, output_path)
             else:
                 workflow, output_node = self._build_t2v(inputs, seed, output_path)
 
             provenance = self._workflow_provenance(
-                inputs, custom_workflow, output_node, operation, workflow
+                inputs, custom_workflow, output_node, operation, workflow,
+                low_vram=use_low_vram,
             )
             paths = self._client.generate(
                 workflow,
@@ -333,7 +377,7 @@ class ComfyUIVideo(BaseTool):
         height = inputs.get("height", 480 if operation == "text_to_video" else 640)
         num_frames = inputs.get("num_frames", 81)
 
-        model_name = self._model_name(inputs, custom_workflow)
+        model_name = self._model_name(inputs, custom_workflow, low_vram=use_low_vram)
         return ToolResult(
             success=True,
             data={
@@ -377,6 +421,22 @@ class ComfyUIVideo(BaseTool):
         })
         return workflow, _T2V_OUTPUT_NODE
 
+    def _build_t2v_lowvram(
+        self, inputs: dict[str, Any], seed: int, output_path: Path
+    ) -> tuple[dict, str]:
+        width = inputs.get("width", 832)
+        height = inputs.get("height", 480)
+        num_frames = inputs.get("num_frames", 81)
+
+        workflow = ComfyUIClient.load_workflow(_WORKFLOWS / "ltxv-t2v.json")
+        workflow = ComfyUIClient.patch_workflow(workflow, {
+            "3": {"text": inputs["prompt"]},
+            "5": {"width": width, "height": height, "length": num_frames},
+            "8": {"seed": seed},
+            "11": {"filename_prefix": output_path.stem},
+        })
+        return workflow, _LOWVRAM_T2V_OUTPUT_NODE
+
     def _build_i2v(
         self, inputs: dict[str, Any], seed: int, output_path: Path
     ) -> tuple[dict, str]:
@@ -415,6 +475,43 @@ class ComfyUIVideo(BaseTool):
         })
         return workflow, _I2V_OUTPUT_NODE
 
+    def _build_i2v_lowvram(
+        self, inputs: dict[str, Any], seed: int, output_path: Path
+    ) -> tuple[dict, str]:
+        width = inputs.get("width", 768)
+        height = inputs.get("height", 512)
+        num_frames = inputs.get("num_frames", 97)
+
+        # Resolve reference image
+        ref_path = inputs.get("reference_image_path")
+        ref_url = inputs.get("reference_image_url")
+
+        if ref_url and not ref_path:
+            resp = requests.get(ref_url, timeout=60)
+            resp.raise_for_status()
+            ref_path = str(output_path.with_suffix(".ref.png"))
+            Path(ref_path).parent.mkdir(parents=True, exist_ok=True)
+            Path(ref_path).write_bytes(resp.content)
+
+        if not ref_path:
+            raise ComfyUIError(
+                "image_to_video requires reference_image_path or reference_image_url"
+            )
+
+        # Upload to ComfyUI
+        upload_name = f"om_{output_path.stem}.png"
+        server_name = self._client.upload_image(Path(ref_path), upload_name)
+
+        workflow = ComfyUIClient.load_workflow(_WORKFLOWS / "ltxv-i2v-simple.json")
+        workflow = ComfyUIClient.patch_workflow(workflow, {
+            "3": {"text": inputs["prompt"]},
+            "5": {"image": server_name},
+            "7": {"width": width, "height": height, "length": num_frames},
+            "8": {"seed": seed},
+            "12": {"filename_prefix": output_path.stem},
+        })
+        return workflow, _LOWVRAM_I2V_OUTPUT_NODE
+
     @staticmethod
     def _load_custom_workflow(inputs: dict[str, Any]) -> dict:
         if inputs.get("workflow_json"):
@@ -422,9 +519,9 @@ class ComfyUIVideo(BaseTool):
         return ComfyUIClient.load_workflow(Path(inputs["workflow_path"]))
 
     @staticmethod
-    def _model_name(inputs: dict[str, Any], custom_workflow: bool) -> str:
+    def _model_name(inputs: dict[str, Any], custom_workflow: bool, *, low_vram: bool = False) -> str:
         if not custom_workflow:
-            return "wan2.2-14b-fp8-4step"
+            return "ltx-video-2b-v0.9.5" if low_vram else "wan2.2-14b-fp8-4step"
         return (
             inputs.get("workflow_model")
             or inputs.get("model")
@@ -439,20 +536,27 @@ class ComfyUIVideo(BaseTool):
         output_node: str,
         operation: str,
         workflow: dict[str, Any],
+        *,
+        low_vram: bool = False,
     ) -> dict[str, Any]:
         if not custom_workflow:
-            workflow_key = (
-                "wan22-i2v-4step"
-                if operation == "image_to_video"
-                else "wan22-t2v-4step"
-            )
+            if low_vram:
+                workflow_key = (
+                    "ltxv-i2v-simple"
+                    if operation == "image_to_video"
+                    else "ltxv-t2v"
+                )
+                wf_file = f"{workflow_key}.json"
+            else:
+                workflow_key = (
+                    "wan22-i2v-4step"
+                    if operation == "image_to_video"
+                    else "wan22-t2v-4step"
+                )
+                wf_file = f"{workflow_key}.json"
             return {
                 "source": "bundled",
-                "workflow": (
-                    "wan22-i2v-4step.json"
-                    if operation == "image_to_video"
-                    else "wan22-t2v-4step.json"
-                ),
+                "workflow": wf_file,
                 "workflow_hash_sha256": workflow_hash(workflow),
                 "model_stack": model_stack(workflow_key, inputs),
                 "output_node": output_node,

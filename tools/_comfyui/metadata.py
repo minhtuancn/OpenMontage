@@ -22,6 +22,48 @@ COMFYUI_SETUP_OFFER: dict[str, Any] = {
 
 
 BUNDLED_MODEL_STACKS: dict[str, list[dict[str, Any]]] = {
+    "ltxv-t2v": [
+        {
+            "role": "checkpoint",
+            "name": "ltx-video-2b-v0.9.5.safetensors",
+            "destination_hint": "ComfyUI/models/checkpoints/",
+            "download_url": (
+                "https://huggingface.co/Lightricks/LTX-Video/blob/main/"
+                "ltx-video-2b-v0.9.5.safetensors"
+            ),
+        },
+        {
+            "role": "text_encoder",
+            "name": "t5xxl_fp8_e4m3fn_scaled.safetensors",
+            "quantization": "FP8",
+            "destination_hint": "ComfyUI/models/text_encoders/",
+            "download_url": (
+                "https://huggingface.co/comfyanonymous/flux_text_encoders/blob/main/"
+                "t5xxl_fp8_e4m3fn_scaled.safetensors"
+            ),
+        },
+    ],
+    "ltxv-i2v-simple": [
+        {
+            "role": "checkpoint",
+            "name": "ltx-video-2b-v0.9.5.safetensors",
+            "destination_hint": "ComfyUI/models/checkpoints/",
+            "download_url": (
+                "https://huggingface.co/Lightricks/LTX-Video/blob/main/"
+                "ltx-video-2b-v0.9.5.safetensors"
+            ),
+        },
+        {
+            "role": "text_encoder",
+            "name": "t5xxl_fp8_e4m3fn_scaled.safetensors",
+            "quantization": "FP8",
+            "destination_hint": "ComfyUI/models/text_encoders/",
+            "download_url": (
+                "https://huggingface.co/comfyanonymous/flux_text_encoders/blob/main/"
+                "t5xxl_fp8_e4m3fn_scaled.safetensors"
+            ),
+        },
+    ],
     "flux2-txt2img": [
         {
             "role": "diffusion_model",
