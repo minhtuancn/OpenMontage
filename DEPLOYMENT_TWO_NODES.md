@@ -20,7 +20,7 @@
 │   RAM: 10GB, CPU: 10 vCores     │     │   RAM: 19GB, CPU: 12 Cores     │
 └─────────────────────────────────┘     └─────────────────────────────────┘
          │                                        │
-         └────────── LAN (10.20.10.0/23) ─────────┘
+         └────────── LAN (10.20.10.0/24) ─────────┘
                     SSH + HTTP API (port 8750)
 ```
 
@@ -54,7 +54,7 @@
 | Port | Machine | Service | Access |
 |------|---------|---------|--------|
 | 22 | Both | SSH | Any (firewalled) |
-| 8750 | GPU | GPU API | LAN subnet (10.20.10.0/23) |
+| 8750 | GPU | GPU API | LAN subnet (10.20.10.0/24) |
 | 4750 | DEV | Backlot | 127.0.0.1 only (SSH tunnel) |
 
 ## Services

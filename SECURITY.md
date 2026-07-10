@@ -27,12 +27,12 @@ Status: active
 Default: deny (incoming), allow (outgoing)
 Rules:
   22/tcp                     ALLOW IN    Anywhere
-  8750/tcp                   ALLOW IN    10.20.10.0/23
+  8750/tcp                   ALLOW IN    10.20.10.0/24
 ```
 
 ### GPU API Security
 - Shared secret authentication via `Authorization: Bearer <secret>`
-- IP-restricted to LAN subnet (10.20.10.0/23)
+- IP-restricted to LAN subnet (10.20.10.0/24)
 - Not exposed to Internet
 
 ### Backlot Security
