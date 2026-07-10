@@ -1,0 +1,135 @@
+{
+  "name": "OpenMontage: Watch & Publish",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": 5,
+          "unit": "minutes"
+        }
+      },
+      "id": "trigger-1",
+      "name": "Poll Every 5 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check /opt/openmontage/projects for completed renders\nconst fs = require('fs');\nconst path = require('path');\nconst projectsDir = '/opt/openmontage/projects';\n\nif (!fs.existsSync(projectsDir)) {\n  return [{ renders: [], message: 'No projects directory' }];\n}\n\nconst projects = fs.readdirSync(projectsDir, { withFileTypes: true })\n  .filter(d => d.isDirectory())\n  .map(d => d.name);\n\nconst renders = [];\nfor (const project of projects) {\n  const outputDir = path.join(projectsDir, project, 'output');\n  if (!fs.existsSync(outputDir)) continue;\n  const files = fs.readdirSync(outputDir)\n    .filter(f => f.match(/\\.(mp4|webm|gif|png|jpg)$/i))\n    .map(f => ({\n      project,\n      file: f,\n      path: path.join(outputDir, f),\n      mtime: fs.statSync(path.join(outputDir, f)).mtime.toISOString()\n    }));\n  renders.push(...files);\n}\n\n// Return only renders from last 5 minutes\nconst cutoff = Date.now() - 5 * 60 * 1000;\nconst recent = renders.filter(r => new Date(r.mtime).getTime() > cutoff);\n\nreturn [{ renders: recent.length > 0 ? recent : [], count: renders.length, message: recent.length > 0 ? 'New renders found' : 'No new renders' }];"
+      },
+      "id": "poll-1",
+      "name": "Check for Renders",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.count }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "if-1",
+      "name": "Has Renders?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build publish notification\nconst renders = $input.all()[0].json.renders;\nconst summary = renders.map(r => `  - ${r.project}/${r.file}`).join('\\n');\n\nreturn [{\n  action: 'publish',\n  title: 'New OpenMontage renders ready for publishing',\n  renders: renders,\n  summary: summary,\n  timestamp: new Date().toISOString()\n}];"
+      },
+      "id": "notify-1",
+      "name": "Format Notification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://10.20.10.103:4750/api/publish",
+        "options": {},
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "renders",
+              "value": "={{ $json.renders }}"
+            },
+            {
+              "name": "source",
+              "value": "='n8n'"
+            }
+          ]
+        }
+      },
+      "id": "webhook-1",
+      "name": "Post to Backlot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1050, 300]
+    }
+  ],
+  "connections": {
+    "Poll Every 5 min": {
+      "main": [
+        [
+          {
+            "node": "Check for Renders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check for Renders": {
+      "main": [
+        [
+          {
+            "node": "Has Renders?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Renders?": {
+      "main": [
+        [
+          {
+            "node": "Format Notification",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Format Notification": {
+      "main": [
+        [
+          {
+            "node": "Post to Backlot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "pinData": {},
+  "versionId": "initial",
+  "triggerCount": 0,
+  "tags": ["openmontage", "automation"]
+}

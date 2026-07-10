@@ -1,33 +1,27 @@
-# OpenMontage - Global Configuration
-
-llm:
-  provider: anthropic            # anthropic | openai | gemini | openrouter | ollama | mistral | minimax
-  model: null                    # null = use provider default
-  temperature: 0.7
-  max_tokens: 4096
-
 budget:
-  mode: warn                     # observe | warn | cap
-  total_usd: 10.00
-  reserve_pct: 0.10              # holdback for retries / cleanup
-  single_action_approval_usd: 0.50
+  mode: warn
   require_approval_for_new_paid_tool: true
-
+  reserve_pct: 0.1
+  single_action_approval_usd: 0.5
+  total_usd: 10.0
 checkpoint:
-  policy: guided                 # guided | manual_all | auto_noncreative
-  storage_dir: pipeline          # relative to project root
-
+  policy: guided
+  storage_dir: pipeline
+llm:
+  max_tokens: 4096
+  model: claude-sonnet-4-6
+  provider: anthropic
+  temperature: 0.7
 output:
-  default_format: mp4
-  default_codec: libx264
   default_audio_codec: aac
-  default_resolution: "1920x1080"
-  default_fps: 30
+  default_codec: libx264
   default_crf: 23
-
+  default_format: mp4
+  default_fps: 30
+  default_resolution: 1920x1080
 paths:
-  pipeline_dir: pipeline
   library_dir: library
-  styles_dir: styles
-  skills_dir: skills
   output_dir: output
+  pipeline_dir: pipeline
+  skills_dir: skills
+  styles_dir: styles
